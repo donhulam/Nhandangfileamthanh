@@ -57,7 +57,7 @@ declare global {
   }
 }
 
-import {GoogleGenAI, GenerateContentResponse, Chat, Part} from '@google/genai';
+import {GoogleGenAI, GenerateContentResponse, Chat, Part, Type} from '@google/genai';
 import {marked} from 'marked';
 import * as docx from 'docx';
 
@@ -115,6 +115,7 @@ class VoiceNotesApp {
   private recognition: SpeechRecognition | null = null;
   private isListening: boolean = false;
   private chatSuggestionContainer: HTMLElement | null = null;
+  private followUpSuggestionsContainer: HTMLElement | null = null;
 
 
   constructor() {
@@ -836,6 +837,7 @@ class VoiceNotesApp {
         if (this.isListening) this.recognition?.stop();
         this.chat = null; // Reset chat session
         this.chatSuggestionContainer = null;
+        this.clearFollowUpSuggestions();
     }
   }
 
@@ -932,14 +934,29 @@ Luôn trả lời bằng tiếng Việt.
       const { isThinking = false, attachment } = options;
       const messageContainer = document.createElement('div');
       messageContainer.className = `chat-message ${sender}-message`;
-
-      const avatar = document.createElement('div');
-      avatar.className = 'avatar';
-      avatar.innerHTML = `<i class="fas ${sender === 'user' ? 'fa-user' : 'fa-robot'}"></i>`;
-
+  
       const content = document.createElement('div');
       content.className = 'message-content';
-
+  
+      if (sender === 'ai') {
+          const bubbleWrapper = document.createElement('div');
+          bubbleWrapper.className = 'ai-message-bubble';
+  
+          const avatar = document.createElement('div');
+          avatar.className = 'avatar';
+          avatar.innerHTML = `<i class="fas fa-robot"></i>`;
+  
+          bubbleWrapper.appendChild(avatar);
+          bubbleWrapper.appendChild(content);
+          messageContainer.appendChild(bubbleWrapper);
+      } else { // user message
+          const avatar = document.createElement('div');
+          avatar.className = 'avatar';
+          avatar.innerHTML = `<i class="fas fa-user"></i>`;
+          messageContainer.appendChild(avatar);
+          messageContainer.appendChild(content);
+      }
+      
       if (attachment) {
           if (attachment.mimeType.startsWith('image/')) {
               const img = document.createElement('img');
@@ -959,19 +976,16 @@ Luôn trả lời bằng tiếng Việt.
               content.appendChild(fileDisplay);
           }
       }
-
+  
       if (isThinking) {
           content.innerHTML += `<div class="thinking-indicator"><span></span><span></span><span></span></div>`;
       } else {
           content.innerHTML += sender === 'ai' ? await marked.parse(message) : message.replace(/\n/g, '<br>');
       }
-
-      messageContainer.appendChild(avatar);
-      messageContainer.appendChild(content);
-
+  
       this.chatMessages.appendChild(messageContainer);
       this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
-
+  
       return messageContainer;
   }
 
@@ -1020,7 +1034,73 @@ Luôn trả lời bằng tiếng Việt.
         }
     }
   
+  private clearFollowUpSuggestions(): void {
+    if (this.followUpSuggestionsContainer) {
+        this.followUpSuggestionsContainer.remove();
+        this.followUpSuggestionsContainer = null;
+    }
+  }
+  
+  private async generateAndDisplayFollowUpSuggestions(aiResponse: string, parentContainer: HTMLElement): Promise<void> {
+    try {
+        const prompt = `Dựa trên câu trả lời sau của AI, hãy tạo 4 câu hỏi tiếp theo ngắn gọn, phù hợp mà người dùng có thể hỏi. Trả về dưới dạng một mảng JSON chứa các chuỗi.
+
+Câu trả lời của AI:
+"${aiResponse.substring(0, 2000)}"`; // Limit context size
+
+        const response = await this.genAI.models.generateContent({
+            model: MODEL_NAME,
+            contents: [{ text: prompt }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.STRING,
+                    },
+                },
+            },
+        });
+
+        const suggestionsJson = response.text.trim();
+        const suggestions = JSON.parse(suggestionsJson);
+
+        if (Array.isArray(suggestions) && suggestions.length > 0) {
+            this.displayFollowUpSuggestions(suggestions, parentContainer);
+        }
+    } catch (error) {
+        console.error("Lỗi tạo câu hỏi gợi ý:", error);
+    }
+  }
+  
+  private displayFollowUpSuggestions(suggestions: string[], parentContainer: HTMLElement): void {
+      this.clearFollowUpSuggestions();
+
+      const container = document.createElement('div');
+      container.className = 'follow-up-suggestions';
+      this.followUpSuggestionsContainer = container;
+
+      suggestions.forEach(text => {
+          if (typeof text !== 'string' || text.trim() === '') return;
+          const button = document.createElement('button');
+          button.className = 'suggestion-button follow-up-button';
+          button.textContent = text;
+          button.onclick = () => {
+              this.chatInput.value = text;
+              this.handleSendMessage();
+              this.chatInput.focus();
+          };
+          container.appendChild(button);
+      });
+
+      if (container.hasChildNodes()) {
+          parentContainer.appendChild(container);
+          this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      }
+  }
+
   private async handleSendMessage(): Promise<void> {
+    this.clearFollowUpSuggestions();
     if (this.chatSuggestionContainer && this.chatSuggestionContainer.parentElement) {
       this.chatSuggestionContainer.remove();
       this.chatSuggestionContainer = null;
@@ -1071,8 +1151,12 @@ Luôn trả lời bằng tiếng Việt.
         }
         
         if (responseText.trim()) {
-            const downloadBtn = this.createChatDownloadButton(responseText);
-            aiMessageContainer.appendChild(downloadBtn);
+            const bubbleWrapper = aiMessageContainer.querySelector('.ai-message-bubble');
+            if (bubbleWrapper) {
+                const downloadBtn = this.createChatDownloadButton(responseText);
+                bubbleWrapper.appendChild(downloadBtn);
+            }
+            this.generateAndDisplayFollowUpSuggestions(responseText, aiMessageContainer);
         }
 
     } catch (error) {
