@@ -1,5 +1,5 @@
 {
-  "name": "nhan-dang-file-am-thanh",
+  "name": "tốc-ký-âm-thanh---ver-6.1",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite preview --host 0.0.0.0 --port $PORT --strictPort"
+    "start": "vite preview --port $PORT --host"
   },
   "dependencies": {
     "@google/genai": "^0.8.0",
@@ -18,8 +18,5 @@
     "@types/node": "^22.14.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }
